@@ -1,4 +1,4 @@
-# Adaptability of Intrusion Detection using Deep SARSAbased Reinforcement Learning under Concept Drift
+# Adaptability of Intrusion Detection using Deep SARSA-based Reinforcement Learning under Concept Drift
 
 BSc Cybersecurity Final Year Project — University of Greenwich — Sudev Siju
 
