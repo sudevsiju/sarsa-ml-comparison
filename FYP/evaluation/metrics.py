@@ -1,7 +1,5 @@
-# evaluation/metrics.py — compute and display performance metrics
-#
-# Covers all metrics specified in the project proposal evaluation plan:
-# accuracy, precision, recall, F1-score, detection latency, and stability.
+# Compute and display performance metrics
+# Covers all metrics specified in the project proposal evaluation plan: accuracy, precision, recall, F1-score, detection latency, and stability.
 
 import time
 import numpy as np
@@ -10,19 +8,8 @@ from sklearn.metrics import (
     f1_score, classification_report
 )
 
-
+# evaluate accuracy, precision, recall, F1.
 def evaluate(y_true, y_pred, model_name="Model"):
-    """
-    Compute accuracy, precision, recall, F1 for a set of predictions.
-
-    Args:
-        y_true:     np.ndarray of true labels
-        y_pred:     np.ndarray of predicted labels
-        model_name: string label for print output
-
-    Returns:
-        dict with keys: accuracy, precision, recall, f1
-    """
     metrics = {
         'accuracy': accuracy_score(y_true, y_pred),
         'precision': precision_score(y_true, y_pred, average='weighted', zero_division=0),
@@ -34,19 +21,7 @@ def evaluate(y_true, y_pred, model_name="Model"):
           f"F1={metrics['f1']:.4f}")
     return metrics
 
-
 def measure_latency(predict_fn, X, n_runs=100):
-    """
-    Measure average single-sample inference time (detection latency).
-
-    Args:
-        predict_fn: callable that takes an np.ndarray and returns predictions
-        X:          np.ndarray — use the test set; only first sample is timed
-        n_runs:     number of repeated runs for a stable average
-
-    Returns:
-        avg_latency_ms: float — milliseconds per sample
-    """
     times = []
     sample = X[:1]  # single sample
     for _ in range(n_runs):
@@ -56,34 +31,15 @@ def measure_latency(predict_fn, X, n_runs=100):
         times.append((end - start) * 1000)  # convert to ms
     return float(np.mean(times))
 
-
 def print_report(y_true, y_pred, label_names=None):
-    """Print a detailed sklearn classification report."""
     print(classification_report(y_true, y_pred,
                                 target_names=label_names, zero_division=0))
 
-
 def compute_stability(scores):
-    """
-    Compute stability as the variance of F1 scores across multiple runs/segments.
-    Lower variance = more stable model (proposal evaluation criterion).
-
-    Args:
-        scores: list of F1 scores across segments or repeated runs
-
-    Returns:
-        variance (float)
-    """
     return float(np.var(scores))
 
-
+# formatted comparison table of all models
 def compare_results(results_dict):
-    """
-    Print a formatted comparison table of all models across all segments.
-
-    Args:
-        results_dict: { segment_name: { model_name: {accuracy, precision, recall, f1} } }
-    """
     segments = list(results_dict.keys())
     models = list(next(iter(results_dict.values())).keys())
     metrics = ['accuracy', 'precision', 'recall', 'f1']
@@ -104,7 +60,6 @@ def compare_results(results_dict):
                 row += f"{val:>{col_w}.4f}"
         print(row)
 
-    # F1 stability: variance between pre-drift and post-drift F1
     print("\nF1 Stability (variance pre→post drift — lower is better):")
     for model in models:
         f1_scores = [results_dict[s][model]['f1'] for s in segments if model in results_dict[s]]

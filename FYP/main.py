@@ -1,5 +1,4 @@
-# main.py — top-level entry point
-#
+# top-level entry point
 # Run this file to execute the full pipeline:
 #   1. Load and preprocess CICIDS2017
 #   2. Create concept drift segments
@@ -26,21 +25,9 @@ from evaluation.visualizer import (plot_f1_over_segments, plot_metric_comparison
                                     plot_training_rewards)
 
 
-# ── Training loops ─────────────────────────────────────────────────────────
-
+# Training loops 
 def train_sarsa(agent, X_train, y_train, n_episodes, max_steps=None):
-    """
-    Train the Deep SARSA agent.
-
-    Each episode:
-    Shuffles training data (or samples max_steps rows)
-    Steps through it sequentially, storing (s,a,r,s',a') transitions
-      - Calls agent.update() after every step (samples from replay buffer)
-      - Decays epsilon at the end of the episode
-
-    Args:
-        max_steps: cap samples per episode (use ~5000 on CPU, None for full data)
-    """
+    
     reward_history = []
     ep_times = []
 
@@ -58,10 +45,7 @@ def train_sarsa(agent, X_train, y_train, n_episodes, max_steps=None):
 
         while not done:
             next_state, reward, done = env.step(action)
-
-            # When episode ends, use a zero vector as the dummy next state
             next_state_arr = next_state if next_state is not None else np.zeros_like(state)
-            # SARSA: select a' using the SAME policy (on-policy)
             next_action = agent.select_action(next_state_arr) if not done else 0
 
             agent.store_transition(state, action, reward, next_state_arr, next_action)
@@ -86,30 +70,7 @@ def train_sarsa(agent, X_train, y_train, n_episodes, max_steps=None):
 
 
 def evaluate_sarsa_online(agent, X_eval, y_eval):
-    """
-    Evaluate Deep SARSA with online adaptation — the key advantage over static models.
 
-    Unlike Random Forest and DQN (which are frozen at test time), Deep SARSA can
-    continue updating its policy during deployment. When the traffic distribution
-    shifts (concept drift), SARSA observes each true label as a reward signal
-    and immediately adapts its Q-network weights.
-
-    Process per sample:
-        1. Predict greedily (epsilon=0)
-        2. Receive true label → compute reward (+1 correct, -1 wrong)
-        3. Store (s, a, r, s', a') transition and update weights via SARSA rule
-
-    This simulates a real IDS scenario where ground-truth labels arrive shortly
-    after classification (e.g. from a SIEM or analyst feedback loop).
-
-    Args:
-        agent:  DeepSARSA — will be mutated (weights updated in-place)
-        X_eval: np.ndarray (n_samples, n_features)
-        y_eval: np.ndarray (n_samples,) — true labels used as reward signal
-
-    Returns:
-        predictions: np.ndarray (n_samples,) — greedy predictions before each update
-    """
     saved_epsilon = agent.epsilon
     agent.epsilon = 0.0        # greedy predictions; adaptation comes from weight updates
 
@@ -146,13 +107,6 @@ def evaluate_sarsa_online(agent, X_eval, y_eval):
 
 
 def train_dqn(agent, X_train, y_train, n_episodes, max_steps=None):
-    """
-    Train the DQN agent.
-
-    Same episode structure as SARSA, but:
-      - Stores (s, a, r, s', done) transitions (no next_action needed)
-      - Uses max over Q(s', ·) for the target, not the actual next action
-    """
     reward_history = []
     ep_times = []
 
@@ -192,12 +146,10 @@ def train_dqn(agent, X_train, y_train, n_episodes, max_steps=None):
     return reward_history
 
 
-# ── Main pipeline ──────────────────────────────────────────────────────────
-
+# Main pipeline 
 def main():
     os.makedirs(config.RESULTS_DIR, exist_ok=True)
 
-    # ── 1-3. Load, segment, preprocess (or restore from cache) ───────────
     cached = load_cache()
     if cached:
         print("\n[1-3] Restored preprocessed data from cache (skipping load+preprocess).")
@@ -207,7 +159,6 @@ def main():
         df = load_cicids2017(config.DATA_DIR)
 
         print("\n[2] Preprocessing full dataset (multiclass labels)...")
-        # Scaler fitted on full dataset first, then segments share the same scale
         X_all, y_all, classes, scaler = preprocess(df)
 
         print("\n[3] Creating strict 3-stage concept drift segments...")
@@ -227,15 +178,13 @@ def main():
     print(f"Classes: {classes}")
 
     n_features = X_train.shape[1]
-    n_actions = config.N_ACTIONS  # 5: BENIGN, DoS, DDoS, BruteForce, Other
+    n_actions = config.N_ACTIONS 
 
-    # ── 4. Random Forest ─────────────────────────────────────────────────
     print("\n[4] Training Random Forest...")
     t0 = time.time()
     rf = train_random_forest(X_train, y_train)
     print(f"Done. ({time.time() - t0:.1f}s)")
 
-    # ── 5. Deep SARSA ────────────────────────────────────────────────────
     print("\n[5] Training Deep SARSA (Mohamed & Ejbali, 2023 approach)...")
     sarsa = DeepSARSA(
         input_dim=n_features,
@@ -255,7 +204,6 @@ def main():
     print(f"  Training complete. ({time.time() - t0:.1f}s)")
     sarsa.save(os.path.join(config.RESULTS_DIR, "sarsa_model.pt"))
 
-    # ── 6. DQN ───────────────────────────────────────────────────────────
     print("\n[6] Training DQN (off-policy RL baseline)...")
     dqn = DQN(
         input_dim=n_features,
@@ -276,17 +224,6 @@ def main():
     print(f"  Training complete. ({time.time() - t0:.1f}s)")
     dqn.save(os.path.join(config.RESULTS_DIR, "dqn_model.pt"))
 
-    # ── 7. Evaluate all models across T1 / T2 / T3 ───────────────────────
-    #
-    # Evaluation strategy:
-    #   RF / DQN  — static prediction (frozen weights, no adaptation)
-    #   Deep SARSA — online adaptation: predicts greedily then updates weights
-    #               using the true label as a reward signal after each sample.
-    #               This is SARSA's key advantage: it adapts to distribution
-    #               shift (concept drift) during deployment, unlike static models.
-    #
-    # T1 (no drift): SARSA evaluated statically — establishes a fair baseline.
-    # T2/T3 (drift): SARSA adapts online — demonstrates the RL advantage.
     print("\n[7] Evaluating all models...")
     all_results = {}
     all_preds = {}
@@ -301,8 +238,6 @@ def main():
         dqn_pred  = dqn.predict(X_eval)
         print(f"DQN eval: {time.time() - t0:.1f}s")
 
-        # Static evaluation on T1 (same distribution as training)
-        # Online adaptation on T2/T3 (drifted distribution)
         t0 = time.time()
         if seg_name == "T1 (no drift)":
             sarsa_pred = sarsa.predict(X_eval)
@@ -321,8 +256,7 @@ def main():
             "DQN": dqn_pred,
             "Deep SARSA": sarsa_pred,
         }
-
-    # ── 8. Detection latency ──────────────────────────────────────────────
+ 
     print("\n[8] Measuring detection latency...")
     latency_dict = {
         "Random Forest": measure_latency(rf.predict, X_test),
@@ -332,14 +266,12 @@ def main():
     for name, lat in latency_dict.items():
         print(f"  {name:<18} {lat:.4f} ms/sample")
 
-    # ── 9. Summary table ──────────────────────────────────────────────────
     print("\n[9] Full results comparison:")
     compare_results(all_results)
 
-    # ── 10. Plots ─────────────────────────────────────────────────────────
+    # Plots 
     print("\n[10] Saving plots to", config.RESULTS_DIR)
 
-    # Reformat for f1 plot: { model: { segment: metrics } }
     model_seg_results = {
         m: {s: all_results[s][m] for s in all_results}
         for m in ["Random Forest", "DQN", "Deep SARSA"]
@@ -366,7 +298,7 @@ def main():
         save_path=os.path.join(config.RESULTS_DIR, "dqn_training.png")
     )
 
-    # Confusion matrices for Deep SARSA across all 3 segments
+    # Confusion matrices 
     for seg_name, y_eval in [("T1 (no drift)", y_test), ("T2 (mild drift)", y_t2), ("T3 (severe drift)", y_t3)]:
         plot_confusion_matrix(
             y_eval, all_preds[seg_name]["Deep SARSA"],
